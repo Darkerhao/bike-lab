@@ -1,0 +1,7 @@
+.playwright-cli/
+artifacts/
+output/
+versions/
+/findings.md
+/progress.md
+/task_plan.md
