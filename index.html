@@ -288,6 +288,9 @@
       .guide-progress span { height: 4px; flex: 1; background: #354854; border-radius: 3px; }
       .guide-progress span.done { background: var(--accent); }
       .guide-instruction { border-left: 2px solid var(--accent); padding: 12px 14px; background: #84e4d108; color: #d0e3df; font-size: 13px; line-height: 1.9; margin: 20px 0; }
+      .guide-task { display: grid; gap: 12px; margin: 20px 0; }
+      .guide-task button { min-height: 44px; font-size: 13px; }
+      .guide-result { margin: 0; padding: 12px 14px; border: 1px solid #84e4d144; border-radius: 8px; color: #c7e5df; font-size: 13px; line-height: 1.85; background: #84e4d108; }
       .guide-controls { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 20px; }
       .guide-controls button { font-size: 13px; min-height: 42px; display: flex; justify-content: center; align-items: center; gap: 7px; }
       .guide-controls .wide { grid-column: 1 / -1; }
@@ -326,6 +329,7 @@
       .cadence-control input { flex: 1; width: 90px; }
       .gear-control { display: flex; gap: 9px; align-items: center; font-size: 12px; color: #b7cad5; }
       .hub-volume-control { display: flex; align-items: center; gap: 12px; max-width: 480px; margin-top: 14px; font-size: 12px; color: #b7cad5; }
+      .drive-explanation { margin: 16px 0 0; padding: 12px 14px; border-left: 2px solid var(--accent); background: #84e4d108; color: #c7ddd8; font-size: 13px; line-height: 1.85; }
       .hub-volume-control input { flex: 1; }
       .hub-volume-control output { min-width: 38px; text-align: right; font: 12px var(--mono); color: #d0e1e9; }
       .drive-lock { font-size: 12px; color: #efc393; }
@@ -494,6 +498,10 @@
         body[data-guided="true"] .mode-note,
         body[data-guided="true"] .view-gizmo { display: none; }
         body[data-guided="true"] .stage-tools { top: 84px; }
+      }
+      @media (min-width: 701px) {
+        body[data-mode="mechanical"] .stage-tools,
+        body[data-guided="true"] .stage-tools { display: grid; grid-template-columns: repeat(2, 40px); top: 150px; }
       }
       @media (prefers-reduced-motion: reduce) {
         *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
@@ -828,6 +836,7 @@
             花鼓音量<input id="hub-volume" type="range" min="0" max="100" value="40" step="1" aria-label="花鼓音量" aria-valuetext="40%" />
             <output id="hub-volume-value" for="hub-volume">40%</output>
           </label>
+          <p id="drive-explanation" class="drive-explanation" role="status" aria-live="polite"></p>
         </div>
       </section>
     </main>
@@ -847,11 +856,11 @@
         <dt>拆解</dt>
         <dd>拖动进度条连续拆解，也可独立拆装选中的零件。</dd>
         <dt>工程标注</dt>
-        <dd>查看零件编号、连接关系、安装方向与参考尺寸。</dd>
+        <dd>默认显示核心结构；从组件目录选择系统，展开零件与连接关系。拆解时显示安装方向与原位亮点。</dd>
         <dt>透视观察</dt>
         <dd>调整外壳透明度，查看五通、花鼓内部轴承。</dd>
         <dt>机械导学</dt>
-        <dd>8 个章节认识结构，再逐步观察曲柄、牙盘、链条、飞轮和后轮。支持自动讲解、暂停、回退和退出。</dd>
+        <dd>8 个章节认识结构，每步完成一次操作并查看结论。自动导学等待操作后停留 6 秒再推进；支持暂停、回退和退出。</dd>
         <dt>花鼓声音</dt>
         <dd>传动时播放模拟花鼓声，节奏随轮速和演示速度变化。底部“花鼓音量”可调节响度，0% 为静音。</dd>
         <dt>快捷键</dt>
@@ -996,6 +1005,24 @@
           brakes: { name: "制动系统", en: "BRAKES", icon: "wheel" },
           saddle: { name: "坐垫系统", en: "SADDLE", icon: "layers" },
         };
+        const CORE_LABELS = ['down-tube', 'fork', 'rear-rim', 'chainring', 'front-disc', 'saddle'];
+        const driveSettings = () => ({ cadence: state.cadence, front: state.frontTeeth, teeth: CONFIG.cassette[state.gear] });
+        function driveChangeText(before, after) {
+          const oldRPM = before.cadence * before.front / before.teeth, newRPM = after.cadence * after.front / after.teeth;
+          const change = newRPM > oldRPM ? '升至' : newRPM < oldRPM ? '降至' : '保持';
+          let cause;
+          if (Object.keys(before).filter(key => before[key] !== after[key]).length > 1) {
+            cause = `设定由 ${before.cadence} RPM、${before.front} / ${before.teeth}T 调为 ${after.cadence} RPM、${after.front} / ${after.teeth}T，按踏频 × 前盘齿数 ÷ 后飞轮齿数计算。`;
+          } else if (before.teeth !== after.teeth) {
+            const doubling = after.teeth === before.teeth * 2 ? '齿数翻倍，传动比减半；' : '';
+            cause = `踏频保持 ${after.cadence} RPM，后飞轮由 ${before.teeth}T 调到 ${after.teeth}T，${doubling}后齿片越大，同踏频下后轮越慢。`;
+          } else if (before.front !== after.front) {
+            cause = `踏频保持 ${after.cadence} RPM，前盘由 ${before.front}T 调到 ${after.front}T。前盘越小，每圈送出的链条越短，后轮越慢。`;
+          } else {
+            cause = `齿数组合保持 ${after.front} / ${after.teeth}T，踏频由 ${before.cadence} 调到 ${after.cadence} RPM，后轮转速与踏频成正比。`;
+          }
+          return `${cause}后轮名义转速由约 ${Math.round(oldRPM)} RPM ${change}约 ${Math.round(newRPM)} RPM。`;
+        }
         const BIKE_DATA = [
           [
             "top-tube",
@@ -1633,6 +1660,12 @@
             if (id && !this.parts.has(id)) return;
             state.selected = id;
             state.related = false;
+            if (state.mode === 'engineering' && !state.guided) {
+              $('category-filter').value = id ? this.parts.get(id).category : '';
+              ui.collapsed.delete($('category-filter').value);
+              ui.renderTree();
+              ui.renderModeNote();
+            }
             if (state.isolated && id) {
               state.isolated = id;
               this.applyVisibility();
@@ -1645,19 +1678,22 @@
             if (id && state.mode === 'product' && !state.guided && innerWidth > 1100) ui.openDrawer('details');
           }
           refreshMaterials() {
+            const system = state.mode === 'engineering' && !state.guided ? $('category-filter').value : '';
             for (const p of this.parts.values()) {
               const selected = state.selected === p.id,
                 hovered = state.hovered === p.id;
-              const related = state.related && this.parts.get(state.selected)?.related.includes(p.id);
+              const related = (state.related || !!system) && this.parts.get(state.selected)?.related.includes(p.id);
+              const moving = Math.abs(p.target - p.progress) > 0.00001;
+              const inSystem = system && p.category === system;
               p.materials.forEach((m, i) => {
                 m.color.copy(p.baseColors[i]);
                 if (m.emissive) {
                   m.emissive.set(
-                    selected ? "#30bdb9" : hovered ? "#277f86" : related ? "#347ab4" : "#000000",
+                    moving ? '#e7ae65' : selected ? "#30bdb9" : hovered ? "#277f86" : related ? "#347ab4" : inSystem ? '#236668' : "#000000",
                   );
-                  m.emissiveIntensity = selected ? 0.28 : hovered ? 0.18 : related ? 0.22 : 0;
+                  m.emissiveIntensity = moving ? 0.4 : selected ? 0.28 : hovered ? 0.18 : related ? 0.22 : inSystem ? 0.12 : 0;
                 }
-                if (state.selected && !selected && !hovered && !related) m.color.multiplyScalar(0.78);
+                if ((state.selected || system) && !selected && !hovered && !related && !inSystem && !moving) m.color.multiplyScalar(0.65);
               });
               p.group.traverse((o) => {
                 if (!o.isMesh) return;
@@ -2670,6 +2706,7 @@
               p.target = p.removable ? THREE.MathUtils.clamp(targets.get(p.id) ?? p.progress, 0, 1) : 0;
               if (targets.has(p.id) && p.removable) moving.push({part: p, start: p.progress});
             }
+            components.refreshMaterials();
             const layer = (p) => p.category === 'frame' ? 0 :
               ['steering', 'saddle'].includes(p.category) ? 1 : p.category === 'wheels' ? 2 :
               p.category === 'brakes' ? 3 : ['chain', 'cassette', 'derailleur'].includes(p.id) ? 5 : 4;
@@ -2683,6 +2720,7 @@
             };
             const finish = () => {
               this.sync();
+              components.refreshMaterials();
               ui.syncTree();
               ui.renderDetails();
               done?.();
@@ -2693,20 +2731,17 @@
             ui.syncDrive();
           }
           all(value, animate = true, done) {
-            state.guidePlaying = false;
             this.animateTo(new Map([...components.parts.keys()].map((id) => [id, value])), animate, done);
           }
           single(id) {
             const p = components.parts.get(id);
             if (!p?.removable) return;
-            state.guidePlaying = false;
             if (!p.visible) components.setVisible(id, true);
             this.animateTo(new Map([[id, p.target > 0.5 ? 0 : 1]]));
           }
           system(category) {
             const parts = [...components.parts.values()].filter((p) => p.category === category && p.removable);
             const target = parts.every((p) => p.target > 0.5) ? 0 : 1;
-            state.guidePlaying = false;
             this.animateTo(new Map(parts.map((p) => [p.id, target])));
           }
           togglePause() {
@@ -2829,34 +2864,30 @@
         }
 
         const GUIDE_STEPS = [
-          { chapter:1, title:'整体结构', target:null, view:'default', text:'车架承载，轮组滚动，转向改变方向，传动提供动力，制动控制速度。', tool:'拖动模型，从左右两侧观察不同系统的安装位置。' },
-          { chapter:2, title:'车架与载荷', target:'down-tube', view:'frame', text:'前三角与后叉共同传递踩踏和路面载荷。变截面碳管兼顾空气动力学与结构刚度。', tool:'一体成型车架保持完整；可用透视观察内部五通与转向轴承。' },
-          { chapter:3, title:'转向系统', target:'headset', view:'frame', text:'把立连接车把与前叉转向管，上下碗组轴承约束转向轴。前叉两腿共同固定前轮。', tool:'沿倾斜的头管轴线，追踪车把、把立、碗组和前叉。' },
-          { chapter:4, title:'车轮系统', target:'rear-spokes', view:'side', text:'交叉辐条把花鼓扭矩传给轮圈。胎面负责抓地，胎壁和空气缓冲路面冲击。', tool:'对比轮胎、48 mm 深框、辐条帽和花鼓法兰。' },
-          { chapter:5, title:'制动系统', target:'front-disc', view:'brake', text:'碟片随车轮旋转，卡钳固定在前叉。两片刹车片夹紧金属盘，产生制动力。', tool:'观察盘片与刹车片之间的间隙，以及卡钳安装座和油管。' },
-          { chapter:6, title:'传动系统', target:'chain', view:'drive', text:'曲柄驱动牙盘，链条连接前后齿片。后拨的两个导轮分别导向与张紧链条。', tool:'金色链节是快扣。108 节链条以固定节距闭合，不随换挡增减。' },
-          { chapter:7, title:'变速原理', target:'cassette', view:'drive', gear:0, motion:true, text:'较大的后齿片降低传动比。相同踏频下，34T 后飞轮比 11T 转得慢。', tool:'调整后飞轮档位，对比链线、后拨姿态和实时转速。' },
+          { chapter:1, title:'整体结构', target:'down-tube', view:'default', action:'related', label:'高亮车架连接', text:'车架承载，轮组滚动，转向改变方向，传动提供动力，制动控制速度。', tool:'高亮下管的连接关系，观察头管和五通怎样接入车架。', result:'下管连接头管与五通。连接线把转向端和踩踏端串起来，载荷由相连的结构共同传递。' },
+          { chapter:2, title:'车架与载荷', target:'bottom-bracket', view:'frame', action:'xray', label:'透视五通轴承', text:'前三角与后叉共同传递踩踏和路面载荷。变截面碳管兼顾空气动力学与结构刚度。', tool:'打开透视，观察一体式车架内部的五通轴心与轴承。', result:'车架外壳半透明后，五通轴承仍清晰可见：车架承托轴承，轴承允许曲柄轴旋转。' },
+          { chapter:3, title:'转向系统', target:'headset', view:'frame', action:'isolate', label:'隔离碗组轴承', text:'把立连接车把与前叉转向管，上下碗组轴承约束转向轴。前叉两腿共同固定前轮。', tool:'隔离上下碗组轴承，沿倾斜的转向轴观察它们的位置。', result:'两只轴承沿同一条倾斜转向轴布置，约束前叉位置，同时允许前叉相对头管转向。' },
+          { chapter:4, title:'车轮系统', target:'rear-spokes', view:'side', action:'isolate', label:'隔离后轮辐条', text:'交叉辐条把花鼓扭矩传给轮圈。胎面负责抓地，胎壁和空气缓冲路面冲击。', tool:'隔离后轮辐条，观察两侧交叉布局怎样连接花鼓与轮圈。', result:'辐条从左右花鼓法兰交叉延伸到轮圈，利用拉力把花鼓的扭矩传到轮圈。' },
+          { chapter:5, title:'制动系统', target:'front-disc', view:'brake', action:'explode', label:'沿安装轴拆下碟片', text:'碟片随车轮旋转，卡钳固定在前叉。两片刹车片夹紧金属盘，产生制动力。', tool:'拆下一片前碟片，观察安装方向、原位标记与卡钳位置。', result:'碟片沿车轴方向移出，亮点标出装配原位。复装后，盘片进入固定卡钳的刹车片间隙。' },
+          { chapter:6, title:'传动系统', target:'chain', view:'drive', action:'play', label:'启动链条传动', text:'曲柄驱动牙盘，链条连接前后齿片。后拨的两个导轮分别导向与张紧链条。', tool:'启动传动，跟随金色快扣观察完整闭环。', result:'牙盘每转一圈送出固定数量的链节，链条把运动传给后飞轮；双导轮引导并张紧回程链段。' },
+          { chapter:7, title:'变速原理', target:'cassette', view:'drive', action:'shift', label:'后飞轮从 17T 换到 34T', motion:true, text:'同踏频下，后齿片越大，后轮转速越低。先固定 50T 前盘、80 RPM 踏频。', tool:'用下方后飞轮控制换到 34T，或点击按钮，观察转速从约 235 RPM 变为 118 RPM。' },
           ...[
-            ['cranks','曲柄输入','左右曲柄相隔 180°。踏板绕五通公转，同时绕自身轴反向补偿，踏面保持水平。'],
-            ['chainring','牙盘旋转','牙盘与曲柄刚性联动；前盘齿数决定曲柄每转一周送出的链条长度。'],
-            ['chain','链条传递','观察金色快扣沿闭环移动。上方受力链段从后飞轮回到前牙盘，两导轮保持张紧。'],
-            ['cassette','飞轮接力','后飞轮通过塔基带动花鼓。其转速等于曲柄转速乘以前后齿数比。'],
-            ['rear-hub','后轮输出','后花鼓、辐条、轮圈和轮胎同步旋转。前轮没有动力连接，在本演示中保持静止。'],
-          ].map(([target,title,text], i)=>({chapter:8,substep:i+1,title, target,view:i===4?'side':'drive',motion:true,gear:6,text,tool:`动力传递 ${i+1} / 5 · 曲柄 → 牙盘 → 链条 → 飞轮 → 后轮` })),
+            ['cranks','曲柄输入','左右曲柄相隔 180°。踏板绕五通公转，同时绕自身轴反向补偿，踏面保持水平。','play','启动曲柄','左右曲柄与牙盘同步转动；踏板绕自身轴反向补偿，保持踏面水平。'],
+            ['chainring','牙盘旋转','牙盘与曲柄刚性联动；前盘齿数决定曲柄每转一周送出的链条长度。','front','前盘从 50T 换到 34T'],
+            ['chain','链条传递','观察金色快扣沿闭环移动。上方受力链段从后飞轮回到前牙盘，两导轮保持张紧。','focus','聚焦链条快扣','金色快扣沿同一条闭环循环，链条保持 108 节；换挡改变链路形状，不会增减链节。'],
+            ['cassette','飞轮接力','后飞轮通过塔基带动花鼓。其转速等于曲柄转速乘以前后齿数比。','shift','后飞轮从 17T 换到 34T'],
+            ['rear-hub','后轮输出','后花鼓、辐条、轮圈和轮胎同步旋转。前轮没有动力连接，在本演示中保持静止。','isolate','隔离后轮花鼓','隔离后花鼓后仍可观察壳体旋转。完整装配时，花鼓通过辐条带动轮圈与轮胎。'],
+          ].map(([target,title,text,action,label,result], i)=>({chapter:8,substep:i+1,title, target,view:i===4?'side':'drive',motion:i!==0,text,action,label,result,
+            tool:`动力传递 ${i+1} / 5 · 曲柄 → 牙盘 → 链条 → 飞轮 → 后轮。完成一次操作，观察当前环节。`,
+          })),
         ];
         class GuidedTour {
           enter() {
             hubSound.unlock();
-            if (!state.guided) this.saved = {cadence:state.cadence,gear:state.gear,front:state.frontTeeth,rate:state.simulationRate};
+            if (!state.guided) this.saved = {cadence:state.cadence,gear:state.gear,front:state.frontTeeth,rate:state.simulationRate,xray:state.xrayEnabled};
             state.guided = true;
             state.guidePlaying = false;
-            state.guideStep = 0;
-            explode.all(0, false);
-            components.restore();
-            state.cadence = 60;
             state.simulationRate = 0.25;
-            transmission.setFront(50);
-            transmission.setGear(6);
             ui.syncGuide();
             this.go(0);
             if (innerWidth <= 1100) ui.openDrawer('details');
@@ -2864,44 +2895,82 @@
           go(step) {
             state.guideStep = Math.max(0, Math.min(GUIDE_STEPS.length - 1, step));
             state.guideClock = 0;
+            this.completed = false;
             const current = GUIDE_STEPS[state.guideStep];
             transmission.setPlaying(false);
-            if (current.gear !== undefined) transmission.setGear(current.gear);
+            explode.all(0, false);
             components.restore();
+            ui.toggleXray(false);
+            state.cadence = current.chapter === 7 ? 80 : 60;
+            transmission.setFront(50);
+            transmission.setGear(6);
+            this.baseline = driveSettings();
             components.select(current.target);
-            state.related = !!current.target;
-            components.refreshMaterials();
             cameraController.view(current.view);
             if (current.motion) transmission.setPlaying(true);
             ui.renderDetails();
             $('details').scrollTop = 0;
           }
+          act() {
+            const step = GUIDE_STEPS[state.guideStep];
+            switch (step.action) {
+              case 'related': state.related = true; components.refreshMaterials(); break;
+              case 'xray': ui.toggleXray(true); break;
+              case 'isolate': components.isolate(step.target); cameraController.focus(step.target); break;
+              case 'explode': explode.single(step.target); cameraController.view('default'); break;
+              case 'play': hubSound.unlock(); transmission.setPlaying(true); break;
+              case 'shift': ui.changeDrive(() => transmission.setGear(0)); break;
+              case 'front': ui.changeDrive(() => transmission.setFront(34)); break;
+              case 'focus': cameraController.focus(step.target); break;
+            }
+          }
+          actionDone() {
+            const step = GUIDE_STEPS[state.guideStep];
+            switch (step.action) {
+              case 'related': return state.related && state.selected === step.target;
+              case 'xray': return state.xrayEnabled;
+              case 'isolate': return state.isolated === step.target;
+              case 'explode': return components.parts.get(step.target).progress > .999;
+              case 'play': return state.playing;
+              case 'shift': return state.gear === 0;
+              case 'front': return state.frontTeeth === 34;
+              case 'focus': return state.currentView === 'part' && state.selected === step.target;
+            }
+          }
           toggle() {
             hubSound.unlock();
             state.guidePlaying = !state.guidePlaying;
             state.guideClock = 0;
-            if (GUIDE_STEPS[state.guideStep].motion) transmission.setPlaying(state.guidePlaying);
-            ui.renderGuide();
+            ui.syncGuidePlayback();
           }
           exit() {
             if (!state.guided) return;
             state.guided = state.guidePlaying = false;
             state.related = false;
             transmission.setPlaying(false);
+            explode.all(0, false);
+            components.restore();
+            ui.toggleXray(this.saved.xray);
             state.cadence = this.saved.cadence;
             state.simulationRate = this.saved.rate;
             transmission.setFront(this.saved.front);
             transmission.setGear(this.saved.gear);
-            components.refreshMaterials();
             ui.syncGuide();
-            ui.renderDetails();
+            components.select(state.selected);
           }
           update(dt) {
-            if (!state.guided || !state.guidePlaying) return;
+            if (!state.guided) return;
+            if (!this.completed && this.actionDone()) {
+              this.completed = true;
+              const step = GUIDE_STEPS[state.guideStep];
+              this.result = ['shift','front'].includes(step.action) ? driveChangeText(this.baseline, driveSettings()) : step.result;
+              ui.syncGuideTask();
+            }
+            if (!state.guidePlaying || !this.completed) return;
             state.guideClock += dt;
             if (state.guideClock > 6) {
               if (state.guideStep < GUIDE_STEPS.length - 1) this.go(state.guideStep + 1);
-              else { state.guidePlaying = false; transmission.setPlaying(false); ui.renderGuide(); }
+              else { state.guidePlaying = false; transmission.setPlaying(false); ui.syncGuidePlayback(); }
             }
           }
         }
@@ -2929,6 +2998,10 @@
             this.group.add(this.lines);
             this.labels = new Map();
             this.arrows = new Map();
+            this.origins = new Map();
+            const originGeometry = keepG(new THREE.SphereGeometry(0.008, 8, 6));
+            const originMaterial = new THREE.MeshBasicMaterial({ color: '#efc887', depthTest: false });
+            materialPool.add(originMaterial);
             this.leaderLines = new Map();
             this.leaders = document.createElementNS("http://www.w3.org/2000/svg", "svg");
             this.leaders.style.cssText =
@@ -2967,6 +3040,10 @@
               arrow.cone.material.opacity = 0.6;
               this.group.add(arrow);
               this.arrows.set(p.id, arrow);
+              const origin = mesh(originGeometry, originMaterial, this.group);
+              origin.position.copy(p.original).add(p.center);
+              origin.castShadow = origin.receiveShadow = false;
+              this.origins.set(p.id, origin);
             }
             this.dimensions = [];
             this.makeDimension(V(REAR.x, -0.07, 0), V(FRONT.x, -0.07, 0), "轴距 1020 mm", V(0.02, -0.08, 0));
@@ -3005,7 +3082,9 @@
             this.dimensions.push({ line, label, anchor });
           }
           update() {
-            const engineering = state.mode === "engineering";
+            const engineering = state.mode === "engineering" && !state.guided;
+            const system = engineering ? $('category-filter').value : '';
+            const selected = components.parts.get(state.selected);
             this.leaders.style.display = engineering ? "" : "none";
             this.group.visible = engineering || state.explode > 0.001 || state.related;
             if (!this.group.visible) {
@@ -3020,9 +3099,10 @@
               return { x: r.left - viewportRect.left, y: r.top - viewportRect.top, w: r.width, h: r.height };
             }), width = viewport.clientWidth,
               height = viewport.clientHeight;
-            const priority = ['down-tube','fork','saddle','handlebar','front-rim','rear-rim','chainring','cassette','derailleur','front-disc','rear-disc','bottom-bracket'];
+            const active = p => Math.abs(p.target - p.progress) > 0.00001;
+            const eligible = p => p.id === state.selected || active(p) || (system ? p.category === system || selected?.related.includes(p.id) : CORE_LABELS.includes(p.id));
             const ordered = [...components.parts.values()].sort((a,b) => {
-              const rank = p => p.id === state.selected ? -1 : priority.includes(p.id) ? priority.indexOf(p.id) : 99;
+              const rank = p => p.id === state.selected ? -3 : active(p) ? -2 : selected?.related.includes(p.id) ? -1 : CORE_LABELS.includes(p.id) ? CORE_LABELS.indexOf(p.id) : 99;
               return rank(a)-rank(b);
             });
             for (const p of ordered) {
@@ -3040,9 +3120,11 @@
               }
               const label = this.labels.get(p.id),
                 leader = this.leaderLines.get(p.id);
-              label.hidden = !engineering || !p.group.visible || placed >= (width < 600 ? 5 : 12) || (!priority.includes(p.id) && p.id !== state.selected);
+              label.hidden = !engineering || !p.group.visible || placed >= (width < 600 ? 5 : system ? 8 : 6) || !eligible(p);
               leader.style.display = label.hidden ? "none" : "";
-              this.arrows.get(p.id).visible = engineering && p.group.visible && p.removable;
+              const showAxis = (engineering || state.guided) && p.group.visible && p.removable && (active(p) || p.id === state.selected && p.progress > .001);
+              this.arrows.get(p.id).visible = showAxis;
+              this.origins.get(p.id).visible = showAxis;
               if (!label.hidden) {
                 const projected = end.clone().project(camera);
                 if (projected.z > 1 || projected.z < -1) {
@@ -3084,16 +3166,18 @@
                 d.label.hidden = p.z > 1 || p.z < -1 || x < 45 || x > width - 45 || y < 0 || y > height - 50;
               }
             }
-            const selected = components.parts.get(state.selected);
-            this.relations.visible = (engineering || state.related) && !!selected?.group.visible;
+            this.relations.visible = engineering ? !!system || !!selected?.group.visible : state.related && !!selected?.group.visible;
             if (this.relations.visible) {
               const data = this.relations.geometry.attributes.position;
               let i = 0;
-              for (const id of selected.related) {
-                const other = components.parts.get(id);
-                if (other && other.group.visible) {
-                  const a = components.worldCenter(selected),
-                    b = components.worldCenter(other);
+              const drawn = new Set();
+              for (const part of components.parts.values()) {
+                if (!part.group.visible || (part.id !== state.selected && (!system || part.category !== system))) continue;
+                for (const id of part.related) {
+                  const other = components.parts.get(id), key = [part.id, id].sort().join(':');
+                  if (!other?.group.visible || drawn.has(key) || (part.id !== state.selected && other.category !== system)) continue;
+                  drawn.add(key);
+                  const a = components.worldCenter(part), b = components.worldCenter(other);
                   data.setXYZ(i++, a.x, a.y, a.z);
                   data.setXYZ(i++, b.x, b.y, b.z);
                 }
@@ -3144,7 +3228,7 @@
             const visible = [...components.parts.values()].filter((p) => p.group.visible).length;
             $("parts-summary").textContent = `${visible} / ${components.parts.size} 组件可见`;
             $("restore-parts").disabled = !state.isolated && visible === components.parts.size;
-            $("explode-system").disabled = !state.selected;
+            $("explode-system").disabled = !state.selected && !$('category-filter').value;
             document.querySelectorAll("[data-part]").forEach((el) => {
               const p = components.parts.get(el.dataset.part);
               el.classList.toggle("selected", state.selected === p.id);
@@ -3201,7 +3285,7 @@
                 ['所属系统',CATEGORY[p.category].name],['材料',p.material],['参考规格',p.parameter],
                 ['装配原点 X / Y / Z',origin.join(' / ')+' mm'],['当前状态',status],
               ].map(([key,value])=>`<div><dt>${key}</dt><dd>${value}</dd></div>`).join('')}</dl>
-              <div class="section-label">连接关系 <button id="part-related" aria-pressed="${state.related}">${icon('link')}高亮关联</button></div>
+              <div class="section-label">连接关系 ${state.mode === 'engineering' ? '<span class="tag">已在场景显示</span>' : `<button id="part-related" aria-pressed="${state.related}">${icon('link')}高亮关联</button>`}</div>
               <div class="related-parts">${p.related.map(id=>`<button data-related="${id}">${components.parts.get(id)?.name || id}</button>`).join('')}</div>
               <div class="detail-tip">${icon('info')}<span>${p.removable ? '沿真实安装轴展开；虚线连接原始装配位置。' : '此结构属于一体成型碳纤维车架，可独立查看、隐藏和透视，不作为可拆装零件。'}</span></div>
               <button id="clear-selection" class="back-to-model">${icon('arrow')}返回产品档案</button>`;
@@ -3217,13 +3301,30 @@
               <h2 class="detail-title lesson-title">${step.title}</h2>
               <p class="detail-description">${step.text}</p>
               <div class="guide-instruction">${step.tool}</div>
+              <div class="guide-task">
+                <button class="primary" id="guide-action"></button>
+                <p id="guide-result" class="guide-result" role="status" aria-live="polite" hidden></p>
+              </div>
               <div class="guide-controls">
                 <button id="guide-prev" ${state.guideStep === 0 ? 'disabled' : ''}>← 上一步</button>
                 <button id="guide-next" class="primary" ${last ? 'disabled' : ''}>下一步 →</button>
-                <button class="wide" id="guide-play" ${last && !state.guidePlaying ? 'disabled' : ''}>${icon(state.guidePlaying ? 'pause' : 'play')}${state.guidePlaying ? '暂停教学' : '自动讲解 · 每步 6 秒'}</button>
+                <button class="wide" id="guide-play"></button>
                 <button id="guide-restart">重新学习</button><button id="guide-exit">退出导学</button>
               </div>
               <p class="guide-caution">当前目标：${step.target ? components.parts.get(step.target).name : '完整自行车'}。可自由旋转观察。维修操作需遵循实际车辆手册。</p>`;
+            this.syncGuideTask();
+          }
+          syncGuideTask() {
+            $('guide-action').disabled = !!guide.completed;
+            $('guide-action').textContent = guide.completed ? '✓ 操作已完成' : GUIDE_STEPS[state.guideStep].label;
+            $('guide-result').hidden = !guide.completed;
+            $('guide-result').textContent = guide.completed ? guide.result : '';
+            this.syncGuidePlayback();
+          }
+          syncGuidePlayback() {
+            $('guide-play').disabled = state.guideStep === GUIDE_STEPS.length - 1 && guide.completed && !state.guidePlaying;
+            $('guide-play').innerHTML = icon(state.guidePlaying ? 'pause' : 'play') + (state.guidePlaying
+              ? guide.completed ? '暂停自动导学' : '自动导学 · 等待操作' : '自动导学 · 操作后停留 6 秒');
           }
           syncGuide() {
             $('guide-button').setAttribute('aria-pressed', String(state.guided));
@@ -3236,6 +3337,7 @@
             transmission.setPlaying(false);
             state.mode = mode;
             document.body.dataset.mode = mode;
+            if (mode === 'engineering') components.select(null);
             this.closeDrawers();
             document.querySelectorAll('button[data-mode]').forEach(b=>{
               b.classList.toggle('active',b.dataset.mode === mode);
@@ -3267,10 +3369,17 @@
           }
           renderModeNote() {
             const note = $('mode-note');
-            note.hidden = !state.xrayEnabled && state.mode !== 'engineering';
+            note.hidden = state.guided || !state.xrayEnabled && state.mode !== 'engineering';
             note.innerHTML = state.xrayEnabled
               ? `<span class="mode-indicator">X-RAY / ${Math.round(state.xrayOpacity*100)}%</span><p>外壳半透明 · 内部轴承保持可见</p>`
-              : '<span class="mode-indicator">ENGINEERING VIEW</span><p>编号定位零件 · 虚线指向装配原位</p>';
+              : `<span class="mode-indicator">ENGINEERING VIEW</span><p>${$('category-filter').value ? `${CATEGORY[$('category-filter').value].name} · 连接线显示结构关系` : '整车核心标注 · 从目录选择系统深入'}<br>拆解高亮移动件 · 亮点标出装配原位</p>`;
+          }
+          changeDrive(update) {
+            const before = driveSettings();
+            update();
+            const after = driveSettings();
+            if (Object.keys(before).some(key => before[key] !== after[key])) this.driveChange = {before, after};
+            this.syncDrive();
           }
           syncDrive() {
             const assembled = components.assembled(), running = state.playing;
@@ -3288,6 +3397,11 @@
             $('front-select').value = state.frontTeeth;
             $('cadence-range').value = state.cadence;
             $('simulation-rate').value = state.simulationRate;
+            const settings = driveSettings();
+            if (this.driveChange && Object.keys(settings).some(key => settings[key] !== this.driveChange.after[key])) this.driveChange = null;
+            $('drive-explanation').textContent = (this.driveChange ? driveChangeText(this.driveChange.before, settings)
+              : `后轮名义转速 = 踏频 × 前盘齿数 ÷ 后飞轮齿数；当前设定为 ${settings.cadence} × ${settings.front} ÷ ${settings.teeth} ≈ ${Math.round(settings.cadence * ratio)} RPM。`)
+              + (running ? '慢放只改变演示速度，以上为设定踏频下的数值。' : '传动已暂停，仪表转速为 0；以上为运行时的设定关系。');
             $('rotate-tool').disabled = !assembled;
             $('product-tour').disabled = !assembled;
             document.querySelectorAll('[data-flow]').forEach(b=>b.classList.toggle('active',b.dataset.flow === state.selected));
@@ -3330,7 +3444,17 @@
           }
           bind() {
             $('category-filter').innerHTML += Object.entries(CATEGORY).map(([id,c])=>`<option value="${id}">${c.name}</option>`).join('');
-            $('category-filter').onchange = () => this.renderTree();
+            $('category-filter').onchange = (e) => {
+              const system = e.target.value;
+              guide.exit();
+              if (state.isolated) components.isolate(state.isolated);
+              components.select(null);
+              e.target.value = system;
+              this.collapsed.delete(system);
+              this.renderTree();
+              this.renderModeNote();
+              components.refreshMaterials();
+            };
             $("restore-parts").onclick = () => components.restore();
             $("parts-tree").onclick = (e) => {
               const category = e.target.closest("[data-category]"),
@@ -3361,6 +3485,7 @@
                 case "part-explode":
                   guide.exit();
                   if (state.mode === 'product') this.setMode('engineering');
+                  components.select(id);
                   explode.single(id);
                   this.renderDetails();
                   break;
@@ -3386,6 +3511,9 @@
                 case "guide-prev":
                   state.guidePlaying = false;
                   guide.go(state.guideStep - 1);
+                  break;
+                case 'guide-action':
+                  guide.act();
                   break;
                 case "guide-next":
                   state.guidePlaying = false;
@@ -3422,7 +3550,7 @@
               components.select(null);
               explode.all(0, true, () => cameraController.view());
             };
-            $("explode-system").onclick = () => { guide.exit(); explode.system(components.parts.get(state.selected).category); };
+            $("explode-system").onclick = () => { guide.exit(); explode.system(components.parts.get(state.selected)?.category || $('category-filter').value); };
             $("explode-pause").onclick = () => explode.togglePause();
             $("reset-view").onclick = () => cameraController.view();
             $("animation-speed").onchange = (e) => (state.animationSpeed = +e.target.value);
@@ -3452,12 +3580,11 @@
               resize();
             };
             $("drive-toggle").onclick = () => {
-              if (state.guided) { state.guidePlaying = false; this.renderGuide(); }
+              if (state.guided) { state.guidePlaying = false; this.syncGuidePlayback(); }
               transmission.setPlaying(!state.playing);
             };
             $("cadence-range").oninput = (e) => {
-              state.cadence = +e.target.value;
-              this.syncDrive();
+              this.changeDrive(() => { state.cadence = +e.target.value; });
             };
             $("gear-select").innerHTML = CONFIG.cassette
               .map(
@@ -3465,8 +3592,8 @@
                   `<option value="${i}" ${i === state.gear ? "selected" : ""}>${i + 1} 档 · ${t}T</option>`,
               )
               .join("");
-            $("gear-select").onchange = (e) => transmission.setGear(+e.target.value);
-            $("front-select").onchange = (e) => transmission.setFront(+e.target.value);
+            $("gear-select").onchange = (e) => this.changeDrive(() => transmission.setGear(+e.target.value));
+            $("front-select").onchange = (e) => this.changeDrive(() => transmission.setFront(+e.target.value));
             $("simulation-rate").onchange = (e) => { state.simulationRate = +e.target.value; hubSound.sync(); };
             $("hub-volume").oninput = (e) => {
               state.hubVolume = +e.target.value;
@@ -3968,7 +4095,7 @@
           if (document.hidden) {
             transmission.setPlaying(false);
             state.guidePlaying = false;
-            if (state.guided) ui.renderGuide();
+            if (state.guided) ui.syncGuidePlayback();
           }
         });
         renderer.domElement.addEventListener("webglcontextlost", (event) => {
